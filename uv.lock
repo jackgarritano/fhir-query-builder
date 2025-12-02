@@ -636,6 +636,7 @@ dependencies = [
     { name = "ipykernel" },
     { name = "pip" },
     { name = "pydantic-ai" },
+    { name = "python-dotenv" },
     { name = "requests" },
 ]
 
@@ -644,6 +645,7 @@ requires-dist = [
     { name = "ipykernel", specifier = ">=7.1.0" },
     { name = "pip", specifier = ">=25.3" },
     { name = "pydantic-ai", specifier = ">=1.25.1" },
+    { name = "python-dotenv", specifier = ">=1.2.1" },
     { name = "requests", specifier = ">=2.31.0" },
 ]
 
