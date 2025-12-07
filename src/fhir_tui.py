@@ -75,6 +75,26 @@ class StatusMessage(Static):
         self.remove_class("error")
 
 
+class TypeOption(Static):
+    """A clickable resource type option"""
+
+    def __init__(self, index: int, selected_type: SelectedResourceType, **kwargs):
+        self.type_index = index
+        self.selected_type = selected_type
+        content = (
+            f"[{index + 1}] {selected_type.selected_type} "
+            f"(confidence: {selected_type.confidence:.2f})\n"
+            f"    {selected_type.reasoning}"
+        )
+        super().__init__(content, **kwargs)
+
+    def on_click(self) -> None:
+        """Handle click to select this type"""
+        app = self.app
+        if isinstance(app, FHIRQueryBuilderApp):
+            app.select_type_at_index(self.type_index)
+
+
 class FHIRQueryBuilderApp(App):
     """FHIR Query Builder TUI Application"""
 
@@ -124,7 +144,6 @@ class FHIRQueryBuilderApp(App):
 
     #selected-types {
         height: auto;
-        max-height: 10;
         border: solid $secondary;
         padding: 1;
         margin: 1 0;
@@ -148,9 +167,14 @@ class FHIRQueryBuilderApp(App):
         background: $boost;
     }
 
-    .selected {
+    .type-option.selected {
         background: $accent;
         color: $text;
+    }
+
+    #selection-hint {
+        color: $text-muted;
+        margin: 0 0 1 0;
     }
     """
 
@@ -202,6 +226,7 @@ class FHIRQueryBuilderApp(App):
             # Step 3: Type Selection
             with Vertical(classes="section"):
                 yield Label("Step 3: Select Resource Type", classes="section-title")
+                yield Label("Click on a resource type to select it:", id="selection-hint")
                 yield ScrollableContainer(id="selected-types")
                 yield Button("Build Query", id="build-query-btn", variant="primary")
                 yield StatusMessage(id="build-status")
@@ -219,6 +244,38 @@ class FHIRQueryBuilderApp(App):
         self.query_one("#select-types-btn", Button).disabled = True
         self.query_one("#build-query-btn", Button).disabled = True
         self.query_one("#copy-btn", Button).disabled = True
+        self.query_one("#selection-hint", Label).display = False
+
+    def select_type_at_index(self, index: int) -> None:
+        """Select a resource type at the given index"""
+        if not self.selected_types or index >= len(self.selected_types):
+            return
+
+        # Update the selected index
+        old_index = self.selected_type_index
+        self.selected_type_index = index
+
+        # Update visual selection
+        types_container = self.query_one("#selected-types", ScrollableContainer)
+        
+        # Remove selection from old item
+        try:
+            old_widget = types_container.query_one(f"#type-{old_index}", TypeOption)
+            old_widget.remove_class("selected")
+        except Exception:
+            pass
+
+        # Add selection to new item
+        try:
+            new_widget = types_container.query_one(f"#type-{index}", TypeOption)
+            new_widget.add_class("selected")
+        except Exception:
+            pass
+
+        # Update build status to show which type is selected
+        status = self.query_one("#build-status", StatusMessage)
+        selected = self.selected_types[index]
+        status.set_success(f"Selected: {selected.selected_type}")
 
     @on(Button.Pressed, "#connect-btn")
     async def connect_to_server(self) -> None:
@@ -301,6 +358,7 @@ class FHIRQueryBuilderApp(App):
         """Handle results from type selection worker"""
         status = self.query_one("#select-status", StatusMessage)
         types_container = self.query_one("#selected-types", ScrollableContainer)
+        selection_hint = self.query_one("#selection-hint", Label)
         
         # Re-enable button
         self.query_one("#select-types-btn", Button).disabled = False
@@ -313,6 +371,7 @@ class FHIRQueryBuilderApp(App):
             types_container.mount(
                 Static(f"Reasoning: {results.reasoning}", classes="error")
             )
+            selection_hint.display = False
             return
 
         # Display selected types
@@ -324,19 +383,23 @@ class FHIRQueryBuilderApp(App):
             if i == 0:
                 classes += " selected"
 
-            type_widget = Static(
-                f"[{i + 1}] {selected_type.selected_type} "
-                f"(confidence: {selected_type.confidence:.2f})\n"
-                f"    {selected_type.reasoning}",
+            type_widget = TypeOption(
+                index=i,
+                selected_type=selected_type,
                 classes=classes,
                 id=f"type-{i}",
             )
             types_container.mount(type_widget)
 
         status.set_success(f"Found {len(results)} matching resource type(s)")
+        selection_hint.display = True
 
         # Enable next step
         self.query_one("#build-query-btn", Button).disabled = False
+        
+        # Show which type is selected
+        build_status = self.query_one("#build-status", StatusMessage)
+        build_status.set_success(f"Selected: {results[0].selected_type}")
 
     def _handle_select_types_error(self, error: Exception) -> None:
         """Handle error from type selection worker"""
@@ -354,7 +417,7 @@ class FHIRQueryBuilderApp(App):
             status.set_error("Please select resource types first")
             return
 
-        # Use the first selected type (or allow user to choose)
+        # Use the currently selected type
         selected_type = self.selected_types[self.selected_type_index]
 
         status.set_loading(f"Building query for {selected_type.selected_type}...")
@@ -452,6 +515,7 @@ class FHIRQueryBuilderApp(App):
         self.query_one("#server-status", StatusMessage).clear()
         self.query_one("#select-status", StatusMessage).clear()
         self.query_one("#build-status", StatusMessage).clear()
+        self.query_one("#selection-hint", Label).display = False
 
         self.selected_types = []
         self.selected_type_index = 0
