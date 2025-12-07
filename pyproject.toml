@@ -11,6 +11,7 @@ dependencies = [
     "pydantic-ai>=1.25.1",
     "python-dotenv>=1.2.1",
     "requests>=2.31.0",
+    "textual>=0.47.0",
 ]
 
 [project.optional-dependencies]
@@ -18,6 +19,10 @@ dev = [
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
 ]
+
+[project.scripts]
+fhir-query-builder = "src.fhir_tui:main"
+fhir-cli = "src.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
