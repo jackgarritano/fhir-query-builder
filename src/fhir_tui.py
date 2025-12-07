@@ -18,7 +18,7 @@ from textual.widgets import (
     LoadingIndicator,
 )
 from textual.binding import Binding
-from textual import on
+from textual import on, work
 from textual.validation import Function
 from dotenv import load_dotenv
 import sys
@@ -169,6 +169,7 @@ class FHIRQueryBuilderApp(App):
         self.selected_types: list[SelectedResourceType] = []
         self.selected_type_index: int = 0
         self.last_query_url: str = ""  # Store the last generated URL
+        self._pending_query: str = ""  # Store query for worker
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
@@ -231,34 +232,43 @@ class FHIRQueryBuilderApp(App):
             return
 
         status.set_loading("Connecting to FHIR server...")
+        self.query_one("#connect-btn", Button).disabled = True
+        
+        # Store URL for worker
+        self._pending_server_url = server_url
+        self._run_connect_worker()
 
-        def fetch_metadata():
-            return fetch_searchable_resources(server_url)
-
+    @work(thread=True)
+    def _run_connect_worker(self) -> None:
+        """Worker that fetches metadata in background thread"""
         try:
-            # Fetch metadata from server in a thread
-            worker = self.run_worker(fetch_metadata, thread=True)
-            self.metadata = await worker.wait()
-
-            # Initialize select agent
-            self.select_agent = SelectTypesAgent(self.metadata)
-
-            status.set_success(
-                f"Connected! Found {len(self.metadata.searchable_types)} resource types"
-            )
-
-            # Enable next step
-            self.query_one("#select-types-btn", Button).disabled = False
-
+            metadata = fetch_searchable_resources(self._pending_server_url)
+            self.call_from_thread(self._handle_connect_success, metadata)
         except Exception as e:
-            status.set_error(f"Connection failed: {str(e)[:100]}")
+            self.call_from_thread(self._handle_connect_error, e)
+
+    def _handle_connect_success(self, metadata: FHIRMetadata) -> None:
+        """Handle successful connection"""
+        status = self.query_one("#server-status", StatusMessage)
+        self.metadata = metadata
+        self.select_agent = SelectTypesAgent(self.metadata)
+        status.set_success(
+            f"Connected! Found {len(self.metadata.searchable_types)} resource types"
+        )
+        self.query_one("#connect-btn", Button).disabled = False
+        self.query_one("#select-types-btn", Button).disabled = False
+
+    def _handle_connect_error(self, error: Exception) -> None:
+        """Handle connection error"""
+        status = self.query_one("#server-status", StatusMessage)
+        status.set_error(f"Connection failed: {str(error)[:100]}")
+        self.query_one("#connect-btn", Button).disabled = False
 
     @on(Button.Pressed, "#select-types-btn")
     async def select_resource_types(self) -> None:
         """Use AI to select appropriate resource types"""
         query_input = self.query_one("#query-input", Input)
         status = self.query_one("#select-status", StatusMessage)
-        types_container = self.query_one("#selected-types", ScrollableContainer)
 
         query = query_input.value.strip()
         if not query:
@@ -270,57 +280,75 @@ class FHIRQueryBuilderApp(App):
             return
 
         status.set_loading("Analyzing query and selecting types...")
+        
+        # Disable button while processing
+        self.query_one("#select-types-btn", Button).disabled = True
 
-        def select_types():
-            return self.select_agent.select_types(query)
+        # Store query for use in worker
+        self._pending_query = query
+        self._run_select_types_worker()
 
+    @work(thread=True)
+    def _run_select_types_worker(self) -> None:
+        """Worker that runs type selection in a background thread"""
         try:
-            # Run type selection in a thread
-            worker = self.run_worker(select_types, thread=True)
-            results = await worker.wait()
-
-            # Clear previous results
-            await types_container.remove_children()
-
-            if isinstance(results, SelectTypeError):
-                status.set_error(f"Error: {results.error}")
-                await types_container.mount(
-                    Static(f"Reasoning: {results.reasoning}", classes="error")
-                )
-                return
-
-            # Display selected types
-            self.selected_types = results
-            self.selected_type_index = 0
-
-            for i, selected_type in enumerate(results):
-                classes = "type-option"
-                if i == 0:
-                    classes += " selected"
-
-                type_widget = Static(
-                    f"[{i + 1}] {selected_type.selected_type} "
-                    f"(confidence: {selected_type.confidence:.2f})\n"
-                    f"    {selected_type.reasoning}",
-                    classes=classes,
-                    id=f"type-{i}",
-                )
-                await types_container.mount(type_widget)
-
-            status.set_success(f"Found {len(results)} matching resource type(s)")
-
-            # Enable next step
-            self.query_one("#build-query-btn", Button).disabled = False
-
+            results = self.select_agent.select_types(self._pending_query)
+            self.call_from_thread(self._handle_select_types_result, results)
         except Exception as e:
-            status.set_error(f"Type selection failed: {str(e)[:100]}")
+            self.call_from_thread(self._handle_select_types_error, e)
+
+    def _handle_select_types_result(self, results) -> None:
+        """Handle results from type selection worker"""
+        status = self.query_one("#select-status", StatusMessage)
+        types_container = self.query_one("#selected-types", ScrollableContainer)
+        
+        # Re-enable button
+        self.query_one("#select-types-btn", Button).disabled = False
+
+        # Clear previous results
+        types_container.remove_children()
+
+        if isinstance(results, SelectTypeError):
+            status.set_error(f"Error: {results.error}")
+            types_container.mount(
+                Static(f"Reasoning: {results.reasoning}", classes="error")
+            )
+            return
+
+        # Display selected types
+        self.selected_types = results
+        self.selected_type_index = 0
+
+        for i, selected_type in enumerate(results):
+            classes = "type-option"
+            if i == 0:
+                classes += " selected"
+
+            type_widget = Static(
+                f"[{i + 1}] {selected_type.selected_type} "
+                f"(confidence: {selected_type.confidence:.2f})\n"
+                f"    {selected_type.reasoning}",
+                classes=classes,
+                id=f"type-{i}",
+            )
+            types_container.mount(type_widget)
+
+        status.set_success(f"Found {len(results)} matching resource type(s)")
+
+        # Enable next step
+        self.query_one("#build-query-btn", Button).disabled = False
+
+    def _handle_select_types_error(self, error: Exception) -> None:
+        """Handle error from type selection worker"""
+        status = self.query_one("#select-status", StatusMessage)
+        status.set_error(f"Type selection failed: {str(error)[:100]}")
+        self.query_one("#select-types-btn", Button).disabled = False
 
     @on(Button.Pressed, "#build-query-btn")
     async def build_query(self) -> None:
         """Build FHIR query for selected resource type"""
         query_input = self.query_one("#query-input", Input)
         status = self.query_one("#build-status", StatusMessage)
-        output = self.query_one("#query-output", Static)
 
         if not self.selected_types:
             status.set_error("Please select resource types first")
@@ -330,52 +358,71 @@ class FHIRQueryBuilderApp(App):
         selected_type = self.selected_types[self.selected_type_index]
 
         status.set_loading(f"Building query for {selected_type.selected_type}...")
+        
+        # Disable button while processing
+        self.query_one("#build-query-btn", Button).disabled = True
+        
+        # Store data for worker
+        self._pending_query = query_input.value
+        self._pending_selected_type = selected_type
+        self._run_build_query_worker()
 
-        def build_query_string():
+    @work(thread=True)
+    def _run_build_query_worker(self) -> None:
+        """Worker that builds query in background thread"""
+        try:
             # Create query agent for this type
             query_agent = CreateQueryAgent(
-                target_type=selected_type.selected_type,
+                target_type=self._pending_selected_type.selected_type,
                 metadata=self.metadata,
                 common_search_params=COMMON_SEARCH_PARAMS,
             )
             # Generate query
-            return query_agent.agent.run_sync(query_input.value)
-
-        try:
-            # Run query building in a thread
-            worker = self.run_worker(build_query_string, thread=True)
-            result = await worker.wait()
-
-            query_output = result.output
-
-            if isinstance(query_output, CreateQueryError):
-                status.set_error("Query generation failed")
-                output.update(
-                    f"[bold red]Error:[/bold red] {query_output.error}\n\n"
-                    f"[yellow]Suggestion:[/yellow] {query_output.suggestion or 'N/A'}"
-                )
-                return
-
-            # Display the query
-            full_url = f"{self.metadata.server_url}/{selected_type.selected_type}?{query_output.query_string}"
-
-            # Store the URL for copying
-            self.last_query_url = full_url
-
-            output.update(
-                f"[bold green]Success![/bold green]\n\n"
-                f"[bold]Resource Type:[/bold] {selected_type.selected_type}\n"
-                f"[bold]Query String:[/bold] {query_output.query_string}\n\n"
-                f"[bold]Full URL:[/bold]\n{full_url}"
-            )
-
-            status.set_success("Query generated successfully!")
-
-            # Enable copy button
-            self.query_one("#copy-btn", Button).disabled = False
-
+            result = query_agent.agent.run_sync(self._pending_query)
+            self.call_from_thread(self._handle_build_query_result, result.output)
         except Exception as e:
-            status.set_error(f"Query building failed: {str(e)[:100]}")
+            self.call_from_thread(self._handle_build_query_error, e)
+
+    def _handle_build_query_result(self, query_output) -> None:
+        """Handle results from query building worker"""
+        status = self.query_one("#build-status", StatusMessage)
+        output = self.query_one("#query-output", Static)
+        selected_type = self._pending_selected_type
+        
+        # Re-enable button
+        self.query_one("#build-query-btn", Button).disabled = False
+
+        if isinstance(query_output, CreateQueryError):
+            status.set_error("Query generation failed")
+            output.update(
+                f"[bold red]Error:[/bold red] {query_output.error}\n\n"
+                f"[yellow]Suggestion:[/yellow] {query_output.suggestion or 'N/A'}"
+            )
+            return
+
+        # Display the query
+        full_url = f"{self.metadata.server_url}/{selected_type.selected_type}?{query_output.query_string}"
+
+        # Store the URL for copying
+        self.last_query_url = full_url
+
+        output.update(
+            f"[bold green]Success![/bold green]\n\n"
+            f"[bold]Resource Type:[/bold] {selected_type.selected_type}\n"
+            f"[bold]Query String:[/bold] {query_output.query_string}\n\n"
+            f"[bold]Full URL:[/bold]\n{full_url}"
+        )
+
+        status.set_success("Query generated successfully!")
+
+        # Enable copy button
+        self.query_one("#copy-btn", Button).disabled = False
+
+    def _handle_build_query_error(self, error: Exception) -> None:
+        """Handle error from query building worker"""
+        status = self.query_one("#build-status", StatusMessage)
+        status.set_error(f"Query building failed: {str(error)[:100]}")
+        self.query_one("#build-query-btn", Button).disabled = False
 
     @on(Button.Pressed, "#copy-btn")
     def copy_to_clipboard(self) -> None:
