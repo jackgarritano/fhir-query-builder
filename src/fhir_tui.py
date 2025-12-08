@@ -126,6 +126,20 @@ class FHIRQueryBuilderApp(App):
         margin: 1 0;
     }
 
+    Horizontal {
+        height: auto;
+        width: 100%;
+    }
+
+    Horizontal Input {
+        width: 1fr;
+        margin: 1 1 1 0;
+    }
+
+    Horizontal Input:last-child {
+        margin: 1 0;
+    }
+
     Button {
         margin: 1 0;
     }
@@ -194,6 +208,9 @@ class FHIRQueryBuilderApp(App):
         self.selected_type_index: int = 0
         self.last_query_url: str = ""  # Store the last generated URL
         self._pending_query: str = ""  # Store query for worker
+        self._pending_server_url: str = ""  # Store server URL for worker
+        self._pending_username: str | None = None  # Store username for worker
+        self._pending_password: str | None = None  # Store password for worker
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
@@ -209,6 +226,17 @@ class FHIRQueryBuilderApp(App):
                     value="https://r4.smarthealthit.org",
                     id="server-url",
                 )
+                yield Label("Optional: Basic Authentication (leave empty if not needed)")
+                with Horizontal():
+                    yield Input(
+                        placeholder="Username (optional)",
+                        id="auth-username",
+                    )
+                    yield Input(
+                        placeholder="Password (optional)",
+                        password=True,
+                        id="auth-password",
+                    )
                 yield Button("Connect to Server", id="connect-btn", variant="primary")
                 yield StatusMessage(id="server-status")
 
@@ -281,25 +309,36 @@ class FHIRQueryBuilderApp(App):
     async def connect_to_server(self) -> None:
         """Connect to FHIR server and fetch metadata"""
         url_input = self.query_one("#server-url", Input)
+        username_input = self.query_one("#auth-username", Input)
+        password_input = self.query_one("#auth-password", Input)
         status = self.query_one("#server-status", StatusMessage)
 
         server_url = url_input.value.strip()
+        username = username_input.value.strip() or None
+        password = password_input.value.strip() or None
+
         if not server_url:
             status.set_error("Please enter a server URL")
             return
 
         status.set_loading("Connecting to FHIR server...")
         self.query_one("#connect-btn", Button).disabled = True
-        
-        # Store URL for worker
+
+        # Store credentials for worker
         self._pending_server_url = server_url
+        self._pending_username = username
+        self._pending_password = password
         self._run_connect_worker()
 
     @work(thread=True)
     def _run_connect_worker(self) -> None:
         """Worker that fetches metadata in background thread"""
         try:
-            metadata = fetch_searchable_resources(self._pending_server_url)
+            metadata = fetch_searchable_resources(
+                self._pending_server_url,
+                self._pending_username,
+                self._pending_password
+            )
             self.call_from_thread(self._handle_connect_success, metadata)
         except Exception as e:
             self.call_from_thread(self._handle_connect_error, e)

@@ -55,7 +55,11 @@ class FHIRMetadata(BaseModel):
 # Metadata Query Function
 # ============================================================================
 
-def fetch_searchable_resources(base_url: str = "https://r4.smarthealthit.org") -> FHIRMetadata:
+def fetch_searchable_resources(
+    base_url: str = "https://r4.smarthealthit.org",
+    username: str | None = None,
+    password: str | None = None
+) -> FHIRMetadata:
     """
     Fetch searchable resource types from FHIR server metadata.
 
@@ -64,6 +68,8 @@ def fetch_searchable_resources(base_url: str = "https://r4.smarthealthit.org") -
 
     Args:
         base_url: FHIR server base URL (default: SMART Health IT R4 server)
+        username: Optional username for basic authentication
+        password: Optional password for basic authentication
 
     Returns:
         FHIRMetadata: Pydantic model containing searchable types and full resource metadata
@@ -75,8 +81,14 @@ def fetch_searchable_resources(base_url: str = "https://r4.smarthealthit.org") -
     # Query metadata endpoint
     metadata_url = f"{base_url}/metadata"
 
+    # Prepare auth if credentials provided
+    auth = None
+    if username and password:
+        from requests.auth import HTTPBasicAuth
+        auth = HTTPBasicAuth(username, password)
+
     try:
-        response = requests.get(metadata_url, timeout=10)
+        response = requests.get(metadata_url, auth=auth, timeout=10)
         response.raise_for_status()
         capability_statement = response.json()
     except requests.RequestException as e:
