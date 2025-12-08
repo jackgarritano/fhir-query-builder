@@ -568,10 +568,10 @@ class FHIRQueryBuilderApp(Screen):
             import pyperclip
             pyperclip.copy(self.last_query_url)
             self.notify("✓ Copied to clipboard!", severity="information")
-        except ImportError:
-            # If pyperclip not available, just show the URL
+        except (ImportError, NotImplementedError):
+            # If pyperclip not available or clipboard not supported, just show the URL
             self.notify(
-                f"URL: {self.last_query_url}",
+                f"Clipboard not available",
                 severity="information",
                 timeout=10
             )
