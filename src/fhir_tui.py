@@ -22,12 +22,13 @@ from textual import on, work
 from textual.screen import Screen
 from dotenv import load_dotenv
 import sys
+import os
 from pathlib import Path
 
 # Add parent directory to path to import agents module
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from agents import (
+from src.agents import (
     fetch_searchable_resources,
     SelectTypesAgent,
     CreateQueryAgent,
@@ -119,7 +120,7 @@ class LoginScreen(Screen):
     def check_password(self):
         # ⚠️ Replace this with a secure check (env var, etc)
         password_input = self.query_one("#password", Input)
-        if password_input.value == "secret123":
+        if password_input.value == os.getenv("TUI_PASSWORD"):
             self.app.push_screen(FHIRQueryBuilderApp())
         else:
             self.notify("Incorrect Password", severity="error")
