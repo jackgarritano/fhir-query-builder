@@ -369,9 +369,9 @@ class FHIRQueryBuilderApp(Screen):
                 self._pending_username,
                 self._pending_password
             )
-            self.call_from_thread(self._handle_connect_success, metadata)
+            self.app.call_from_thread(self._handle_connect_success, metadata)
         except Exception as e:
-            self.call_from_thread(self._handle_connect_error, e)
+            self.app.call_from_thread(self._handle_connect_error, e)
 
     def _handle_connect_success(self, metadata: FHIRMetadata) -> None:
         """Handle successful connection"""
@@ -419,9 +419,9 @@ class FHIRQueryBuilderApp(Screen):
         """Worker that runs type selection in a background thread"""
         try:
             results = self.select_agent.select_types(self._pending_query)
-            self.call_from_thread(self._handle_select_types_result, results)
+            self.app.call_from_thread(self._handle_select_types_result, results)
         except Exception as e:
-            self.call_from_thread(self._handle_select_types_error, e)
+            self.app.call_from_thread(self._handle_select_types_error, e)
 
     def _handle_select_types_result(self, results) -> None:
         """Handle results from type selection worker"""
@@ -511,9 +511,9 @@ class FHIRQueryBuilderApp(Screen):
             )
             # Generate query
             result = query_agent.agent.run_sync(self._pending_query)
-            self.call_from_thread(self._handle_build_query_result, result.output)
+            self.app.call_from_thread(self._handle_build_query_result, result.output)
         except Exception as e:
-            self.call_from_thread(self._handle_build_query_error, e)
+            self.app.call_from_thread(self._handle_build_query_error, e)
 
     def _handle_build_query_result(self, query_output) -> None:
         """Handle results from query building worker"""
