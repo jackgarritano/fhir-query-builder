@@ -5,7 +5,7 @@ A terminal-based interface for building FHIR search queries using AI agents.
 """
 
 from textual.app import App, ComposeResult
-from textual.containers import Container, Horizontal, Vertical, ScrollableContainer
+from textual.containers import Center, Middle, Horizontal, Vertical, ScrollableContainer
 from textual.widgets import (
     Header,
     Footer,
@@ -19,7 +19,7 @@ from textual.widgets import (
 )
 from textual.binding import Binding
 from textual import on, work
-from textual.validation import Function
+from textual.screen import Screen
 from dotenv import load_dotenv
 import sys
 from pathlib import Path
@@ -94,8 +94,37 @@ class TypeOption(Static):
         if isinstance(app, FHIRQueryBuilderApp):
             app.select_type_at_index(self.type_index)
 
+class FhirApp(App):
+    CSS = """
+    LoginScreen { align: center middle; }
+    Middle { width: 50%; height: auto; border: solid green; }
+    Input { margin: 1; }
+    Button { width: 100%; }
+    """
 
-class FHIRQueryBuilderApp(App):
+    def on_mount(self):
+        self.push_screen(LoginScreen())
+
+class LoginScreen(Screen):
+    def compose(self) -> ComposeResult:
+        yield Middle(
+            Center(
+                Label("🔒 Restricted Access"),
+                Input(placeholder="Password", password=True, id="password"),
+                Button("Login", id="login_btn"),
+            )
+        )
+
+    @on(Button.Pressed, "#login_btn")
+    def check_password(self):
+        # ⚠️ Replace this with a secure check (env var, etc)
+        password_input = self.query_one("#password", Input)
+        if password_input.value == "secret123":
+            self.app.push_screen(FHIRQueryBuilderApp())
+        else:
+            self.notify("Incorrect Password", severity="error")
+
+class FHIRQueryBuilderApp(Screen):
     """FHIR Query Builder TUI Application"""
 
     CSS = """
@@ -567,7 +596,7 @@ class FHIRQueryBuilderApp(App):
 
 def main():
     """Run the FHIR Query Builder TUI"""
-    app = FHIRQueryBuilderApp()
+    app = FhirApp()
     app.run()
 
 
