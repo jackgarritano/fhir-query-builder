@@ -79,6 +79,9 @@ class StatusMessage(Static):
 class TypeOption(Static):
     """A clickable resource type option"""
 
+class TypeOption(Static):
+    """A clickable resource type option"""
+
     def __init__(self, index: int, selected_type: SelectedResourceType, **kwargs):
         self.type_index = index
         self.selected_type = selected_type
@@ -91,9 +94,10 @@ class TypeOption(Static):
 
     def on_click(self) -> None:
         """Handle click to select this type"""
-        app = self.app
-        if isinstance(app, FHIRQueryBuilderApp):
-            app.select_type_at_index(self.type_index)
+        # FIX: Use self.screen instead of self.app.
+        # The logic resides on the FHIRQueryBuilderApp Screen, not the main FhirApp.
+        if isinstance(self.screen, FHIRQueryBuilderApp):
+            self.screen.select_type_at_index(self.type_index)
 
 class FhirApp(App):
     CSS = """
@@ -241,6 +245,9 @@ class FHIRQueryBuilderApp(Screen):
         self._pending_server_url: str = ""  # Store server URL for worker
         self._pending_username: str | None = None  # Store username for worker
         self._pending_password: str | None = None  # Store password for worker
+
+    def action_quit(self) -> None:
+        self.app.exit()
 
     def compose(self) -> ComposeResult:
         """Create child widgets for the app."""
